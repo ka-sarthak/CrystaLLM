@@ -1,11 +1,15 @@
 import math
 import re
 import pandas as pd
+import numpy as np
+import warnings
+
 
 from pymatgen.core import Composition
 from pymatgen.io.cif import CifBlock
 from pymatgen.symmetry.groups import SpaceGroup
 from pymatgen.core.operations import SymmOp
+from pymatgen.util.string import transformation_to_string
 
 
 def get_unit_cell_volume(a, b, c, alpha_deg, beta_deg, gamma_deg):
@@ -81,6 +85,19 @@ def get_atomic_props_block(composition, oxi=False):
 
     return str(CifBlock(data, loops, "")).replace("data_\n", "")
 
+def as_xyz_str_ops(operation) -> str:
+    """Get a string of the form 'x, y, z', '-x, -y, z', '-y+1/2, x+1/2, z+1/2', etc.
+    Only works for integer rotation matrices.
+    """
+    # Check for invalid rotation matrix
+    if not np.allclose(operation.rotation_matrix, np.round(operation.rotation_matrix)):
+        warnings.warn("Rotation matrix should be integer", stacklevel=2)
+
+    return transformation_to_string(
+        operation.rotation_matrix,
+        translation_vec=operation.translation_vector,
+        delim=", ",
+    )
 
 def replace_symmetry_operators(cif_str, space_group_symbol):
     space_group = SpaceGroup(space_group_symbol)
@@ -93,7 +110,8 @@ def replace_symmetry_operators(cif_str, space_group_symbol):
         v = op.translation_vector
         symmops.append(SymmOp.from_rotation_and_translation(op.rotation_matrix, v))
 
-    ops = [op.as_xyz_string() for op in symmops]
+    #ops = [op.as_xyz_string() for op in symmops]
+    ops = [as_xyz_str_ops(op) for op in symmops]
     data["_symmetry_equiv_pos_site_id"] = [f"{i}" for i in range(1, len(ops) + 1)]
     data["_symmetry_equiv_pos_as_xyz"] = ops
 
