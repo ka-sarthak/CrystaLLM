@@ -296,6 +296,17 @@ class GPT(nn.Module):
         mfu = flops_achieved / flops_promised
         return mfu
 
+    def postprocess_generation(self, generated: torch.Tensor) -> list[str]:
+        """
+        Decode generated token indices to strings, removing unwanted trailing newlines.
+        """
+        tokenizer = CIFTokenizer()
+        generated_strings = [tokenizer.decode(sample.tolist()) for sample in generated]
+        # remove additional newlines at the end (retain two newlines)
+        for i, generated_string in enumerate(generated_strings):
+            generated_strings[i] = generated_string.strip("\n") + "\n\n"
+        return generated_strings
+
     @torch.no_grad()
     def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None):
         """
