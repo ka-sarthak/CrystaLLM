@@ -296,16 +296,30 @@ class GPT(nn.Module):
         mfu = flops_achieved / flops_promised
         return mfu
 
+    def postprocess_generation(self, generated: torch.Tensor) -> list[str]:
+        """
+        Decode generated token indices to strings, removing unwanted trailing newlines.
+        """
+        tokenizer = CIFTokenizer()
+        generated_strings = [tokenizer.decode(sample.tolist()) for sample in generated]
+        # remove additional newlines at the end (retain two newlines)
+        for i, generated_string in enumerate(generated_strings):
+            generated_strings[i] = generated_string.strip("\n") + "\n\n"
+        return generated_strings
+
     @torch.no_grad()
     def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None):
         """
         Take a conditioning sequence of indices idx (LongTensor of shape (b,t)) and complete
         the sequence max_new_tokens times, feeding the predictions back into the model each time.
         Most likely you'll want to make sure to be in model.eval() mode of operation for this.
+        If a sequence in the batch is completed (i.e., two consecutive newlines are generated),
+        it will be padded with newlines for the remaining tokens.
         """
         tokenizer = CIFTokenizer()
         newline_id = tokenizer.token_to_id["\n"]
-        prev_id = None
+        prev_id = [None] * idx.size(0)
+        completed = [False] * idx.size(0)
         for _ in range(max_new_tokens):
             # if the sequence context is growing too long we must crop it at block_size
             idx_cond = idx if idx.size(1) <= self.config.block_size else idx[:, -self.config.block_size:]
@@ -323,9 +337,20 @@ class GPT(nn.Module):
             idx_next = torch.multinomial(probs, num_samples=1)
             # append sampled index to the running sequence and continue
             idx = torch.cat((idx, idx_next), dim=1)
+            # if the sequence is completed, replace the computed id with newline_id
+            for i in range(len(idx)):
+                if completed[i]:
+                    idx[i, -1] = newline_id
             # a sequence of two newlines indicates the end of a CIF file
-            if prev_id is not None and prev_id == newline_id and idx_next.item() == newline_id:
+            for i in range(len(idx)):
+                if (
+                    prev_id[i] is not None
+                    and prev_id[i] == newline_id
+                    and idx_next[i][0].item() == newline_id
+                ):
+                    completed[i] = True
+            if all(completed):
                 break
-            prev_id = idx_next.item()
+            prev_id = idx_next[:, 0].tolist()
 
         return idx
